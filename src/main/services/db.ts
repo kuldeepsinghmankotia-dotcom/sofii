@@ -37,6 +37,16 @@ export interface Memory {
   updated_at: number
 }
 
+export type ReminderStatus = 'pending' | 'fired' | 'cancelled'
+
+export interface Reminder {
+  id: string
+  content: string
+  scheduled_at: number
+  status: ReminderStatus
+  created_at: number
+}
+
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS conversations (
     id         TEXT PRIMARY KEY,
@@ -61,6 +71,16 @@ const SCHEMA = `
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS reminders (
+    id           TEXT PRIMARY KEY,
+    content      TEXT NOT NULL,
+    scheduled_at INTEGER NOT NULL,
+    status       TEXT NOT NULL CHECK(status IN ('pending','fired','cancelled')) DEFAULT 'pending',
+    created_at   INTEGER NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_reminders_status ON reminders(status, scheduled_at);
 `
 
 export const DEFAULT_CONVERSATION_TITLE = 'New conversation'
@@ -174,6 +194,48 @@ export class SofiiDb {
 
   deleteMemory(memoryId: string): void {
     this.db.prepare(`DELETE FROM memories WHERE id = ?`).run(memoryId)
+  }
+
+  createReminder(content: string, scheduledAt: number): Reminder {
+    const reminder: Reminder = {
+      id: randomUUID(),
+      content,
+      scheduled_at: scheduledAt,
+      status: 'pending',
+      created_at: Date.now()
+    }
+
+    this.db
+      .prepare(
+        `INSERT INTO reminders (id, content, scheduled_at, status, created_at) VALUES (@id, @content, @scheduled_at, @status, @created_at)`
+      )
+      .run(reminder)
+
+    return reminder
+  }
+
+  listReminders(): Reminder[] {
+    return this.db
+      .prepare(
+        `SELECT id, content, scheduled_at, status, created_at FROM reminders ORDER BY scheduled_at ASC`
+      )
+      .all() as Reminder[]
+  }
+
+  listPendingReminders(): Reminder[] {
+    return this.db
+      .prepare(
+        `SELECT id, content, scheduled_at, status, created_at FROM reminders WHERE status = 'pending' ORDER BY scheduled_at ASC`
+      )
+      .all() as Reminder[]
+  }
+
+  updateReminderStatus(reminderId: string, status: ReminderStatus): void {
+    this.db.prepare(`UPDATE reminders SET status = ? WHERE id = ?`).run(status, reminderId)
+  }
+
+  deleteReminder(reminderId: string): void {
+    this.db.prepare(`DELETE FROM reminders WHERE id = ?`).run(reminderId)
   }
 
   close(): void {

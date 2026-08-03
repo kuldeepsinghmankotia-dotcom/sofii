@@ -1,10 +1,9 @@
 import { useEffect, useState, type ReactElement } from 'react'
-import ConversationList from './components/ConversationList'
+import ConversationList, { type View } from './components/ConversationList'
 import ChatWindow from './components/ChatWindow'
 import MemoryPanel from './components/MemoryPanel'
+import ReminderPanel from './components/ReminderPanel'
 import type { ConversationSummary } from '../../preload/api'
-
-type View = 'chat' | 'memories'
 
 export default function App(): ReactElement {
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
@@ -65,11 +64,11 @@ export default function App(): ReactElement {
         onDelete={handleDelete}
         onRename={handleRename}
         view={view}
-        onToggleView={() => setView((v) => (v === 'chat' ? 'memories' : 'chat'))}
+        onSetView={setView}
       />
-      {view === 'memories' ? (
-        <MemoryPanel />
-      ) : (
+      {view === 'memories' && <MemoryPanel />}
+      {view === 'reminders' && <ReminderPanel />}
+      {view === 'chat' && (
         <ChatWindow
           key={selectedId ?? 'none'}
           conversationId={selectedId}

@@ -1,6 +1,8 @@
 import { useState, type ReactElement } from 'react'
 import type { ConversationSummary } from '../../../preload/api'
 
+export type View = 'chat' | 'memories' | 'reminders'
+
 type Props = {
   conversations: ConversationSummary[]
   selectedId: string | null
@@ -8,8 +10,8 @@ type Props = {
   onCreate: () => void
   onDelete: (id: string) => void
   onRename: (id: string, title: string) => void
-  view: 'chat' | 'memories'
-  onToggleView: () => void
+  view: View
+  onSetView: (view: View) => void
 }
 
 export default function ConversationList({
@@ -20,7 +22,7 @@ export default function ConversationList({
   onDelete,
   onRename,
   view,
-  onToggleView
+  onSetView
 }: Props): ReactElement {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingValue, setEditingValue] = useState('')
@@ -63,21 +65,57 @@ export default function ConversationList({
           + New conversation
         </button>
 
-        <button
-          onClick={onToggleView}
-          style={{
-            width: '100%',
-            background: view === 'memories' ? '#1f2937' : 'transparent',
-            color: 'white',
-            border: '1px solid #374151',
-            borderRadius: 10,
-            padding: '10px 12px',
-            cursor: 'pointer',
-            fontSize: 14
-          }}
-        >
-          {view === 'memories' ? '💬 Back to chats' : '🧠 Memories'}
-        </button>
+        {view !== 'chat' && (
+          <button
+            onClick={() => onSetView('chat')}
+            style={{
+              width: '100%',
+              background: 'transparent',
+              color: 'white',
+              border: '1px solid #374151',
+              borderRadius: 10,
+              padding: '10px 12px',
+              cursor: 'pointer',
+              fontSize: 14
+            }}
+          >
+            💬 Back to chats
+          </button>
+        )}
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={() => onSetView(view === 'memories' ? 'chat' : 'memories')}
+            style={{
+              flex: 1,
+              background: view === 'memories' ? '#1f2937' : 'transparent',
+              color: 'white',
+              border: '1px solid #374151',
+              borderRadius: 10,
+              padding: '10px 8px',
+              cursor: 'pointer',
+              fontSize: 13
+            }}
+          >
+            🧠 Memories
+          </button>
+
+          <button
+            onClick={() => onSetView(view === 'reminders' ? 'chat' : 'reminders')}
+            style={{
+              flex: 1,
+              background: view === 'reminders' ? '#1f2937' : 'transparent',
+              color: 'white',
+              border: '1px solid #374151',
+              borderRadius: 10,
+              padding: '10px 8px',
+              cursor: 'pointer',
+              fontSize: 13
+            }}
+          >
+            ⏰ Reminders
+          </button>
+        </div>
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px' }}>

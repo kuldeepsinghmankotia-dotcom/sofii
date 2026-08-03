@@ -83,4 +83,37 @@ describe('SofiiDb', () => {
     db.deleteMemory(memory.id)
     expect(db.listMemories()).toEqual([])
   })
+
+  it('creates a reminder as pending and lists it ordered by scheduled time', () => {
+    const later = db.createReminder('Call the dentist', Date.now() + 60_000)
+    const sooner = db.createReminder('Take a break', Date.now() + 1_000)
+
+    expect(later.status).toBe('pending')
+
+    const list = db.listReminders()
+    expect(list.map((r) => r.id)).toEqual([sooner.id, later.id])
+  })
+
+  it('only lists pending reminders in listPendingReminders', () => {
+    const pending = db.createReminder('Still pending', Date.now() + 1_000)
+    const cancelled = db.createReminder('Will be cancelled', Date.now() + 1_000)
+    db.updateReminderStatus(cancelled.id, 'cancelled')
+
+    const list = db.listPendingReminders()
+    expect(list.map((r) => r.id)).toEqual([pending.id])
+  })
+
+  it('updates a reminder status', () => {
+    const reminder = db.createReminder('Water the plants', Date.now() + 1_000)
+    db.updateReminderStatus(reminder.id, 'fired')
+
+    const [updated] = db.listReminders()
+    expect(updated.status).toBe('fired')
+  })
+
+  it('deletes a reminder', () => {
+    const reminder = db.createReminder('Temporary reminder', Date.now() + 1_000)
+    db.deleteReminder(reminder.id)
+    expect(db.listReminders()).toEqual([])
+  })
 })

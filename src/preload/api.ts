@@ -47,6 +47,16 @@ export interface Memory {
   updated_at: number
 }
 
+export type ReminderStatus = 'pending' | 'fired' | 'cancelled'
+
+export interface Reminder {
+  id: string
+  content: string
+  scheduled_at: number
+  status: ReminderStatus
+  created_at: number
+}
+
 export interface SofiiElectronAPI {
   createConversation: () => Promise<Conversation>
   listConversations: () => Promise<ConversationSummary[]>
@@ -60,4 +70,9 @@ export interface SofiiElectronAPI {
   listMemories: () => Promise<Memory[]>
   updateMemory: (memoryId: string, content: string) => Promise<{ ok: true }>
   deleteMemory: (memoryId: string) => Promise<{ ok: true }>
+  createReminder: (content: string, scheduledAt: number) => Promise<Reminder>
+  listReminders: () => Promise<Reminder[]>
+  cancelReminder: (reminderId: string) => Promise<{ ok: true }>
+  deleteReminder: (reminderId: string) => Promise<{ ok: true }>
+  onReminderFired: (callback: (reminder: Reminder) => void) => () => void
 }

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { StreamEvent, SofiiElectronAPI } from './api'
+import type { StreamEvent, Reminder, SofiiElectronAPI } from './api'
 
 const api: SofiiElectronAPI = {
   createConversation: () => ipcRenderer.invoke('chat:create-conversation'),
@@ -32,7 +32,22 @@ const api: SofiiElectronAPI = {
 
   updateMemory: (memoryId, content) => ipcRenderer.invoke('memory:update', memoryId, content),
 
-  deleteMemory: (memoryId) => ipcRenderer.invoke('memory:delete', memoryId)
+  deleteMemory: (memoryId) => ipcRenderer.invoke('memory:delete', memoryId),
+
+  createReminder: (content, scheduledAt) =>
+    ipcRenderer.invoke('reminder:create', content, scheduledAt),
+
+  listReminders: () => ipcRenderer.invoke('reminder:list'),
+
+  cancelReminder: (reminderId) => ipcRenderer.invoke('reminder:cancel', reminderId),
+
+  deleteReminder: (reminderId) => ipcRenderer.invoke('reminder:delete', reminderId),
+
+  onReminderFired: (callback) => {
+    const listener = (_: Electron.IpcRendererEvent, data: Reminder): void => callback(data)
+    ipcRenderer.on('reminder:fired', listener)
+    return () => ipcRenderer.removeListener('reminder:fired', listener)
+  }
 }
 
 contextBridge.exposeInMainWorld('electron', api)
