@@ -47,6 +47,11 @@ export default function App(): ReactElement {
     }
   }
 
+  const handleRename = async (id: string, title: string): Promise<void> => {
+    await window.electron.renameConversation(id, title)
+    await refreshConversations()
+  }
+
   return (
     <div style={{ height: '100vh', background: '#111827', display: 'flex' }}>
       <ConversationList
@@ -58,6 +63,7 @@ export default function App(): ReactElement {
         }}
         onCreate={handleCreate}
         onDelete={handleDelete}
+        onRename={handleRename}
         view={view}
         onToggleView={() => setView((v) => (v === 'chat' ? 'memories' : 'chat'))}
       />

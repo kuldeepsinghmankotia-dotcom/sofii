@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react'
+import { useState, type ReactElement } from 'react'
 import type { ConversationSummary } from '../../../preload/api'
 
 type Props = {
@@ -7,6 +7,7 @@ type Props = {
   onSelect: (id: string) => void
   onCreate: () => void
   onDelete: (id: string) => void
+  onRename: (id: string, title: string) => void
   view: 'chat' | 'memories'
   onToggleView: () => void
 }
@@ -17,9 +18,24 @@ export default function ConversationList({
   onSelect,
   onCreate,
   onDelete,
+  onRename,
   view,
   onToggleView
 }: Props): ReactElement {
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingValue, setEditingValue] = useState('')
+
+  const startEditing = (conversation: ConversationSummary): void => {
+    setEditingId(conversation.id)
+    setEditingValue(conversation.title)
+  }
+
+  const commitEditing = (): void => {
+    if (editingId && editingValue.trim()) {
+      onRename(editingId, editingValue.trim())
+    }
+    setEditingId(null)
+  }
   return (
     <div
       style={{
@@ -82,15 +98,44 @@ export default function ConversationList({
               fontSize: 14
             }}
           >
-            <span
-              style={{
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              {conversation.title}
-            </span>
+            {editingId === conversation.id ? (
+              <input
+                autoFocus
+                value={editingValue}
+                onChange={(e) => setEditingValue(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                onBlur={commitEditing}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitEditing()
+                  if (e.key === 'Escape') setEditingId(null)
+                }}
+                style={{
+                  flex: 1,
+                  background: '#111827',
+                  color: 'white',
+                  border: '1px solid #2563eb',
+                  borderRadius: 6,
+                  padding: '2px 6px',
+                  fontSize: 14,
+                  minWidth: 0
+                }}
+              />
+            ) : (
+              <span
+                onDoubleClick={(e) => {
+                  e.stopPropagation()
+                  startEditing(conversation)
+                }}
+                title="Double-click to rename"
+                style={{
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                {conversation.title}
+              </span>
+            )}
             <button
               onClick={(e) => {
                 e.stopPropagation()
@@ -102,7 +147,8 @@ export default function ConversationList({
                 border: 'none',
                 color: '#9ca3af',
                 cursor: 'pointer',
-                fontSize: 14
+                fontSize: 14,
+                flexShrink: 0
               }}
             >
               ✕

@@ -63,6 +63,8 @@ const SCHEMA = `
   );
 `
 
+export const DEFAULT_CONVERSATION_TITLE = 'New conversation'
+
 export class SofiiDb {
   private db: Database.Database
 
@@ -73,7 +75,7 @@ export class SofiiDb {
     this.db.exec(SCHEMA)
   }
 
-  createConversation(title = 'New conversation'): Conversation {
+  createConversation(title = DEFAULT_CONVERSATION_TITLE): Conversation {
     const now = Date.now()
     const conversation: Conversation = {
       id: randomUUID(),

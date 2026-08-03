@@ -4,6 +4,8 @@ import type { Memory } from '../../../preload/api'
 export default function MemoryPanel(): ReactElement {
   const [memories, setMemories] = useState<Memory[]>([])
   const [input, setInput] = useState('')
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingValue, setEditingValue] = useState('')
 
   const refresh = async (): Promise<void> => {
     setMemories(await window.electron.listMemories())
@@ -23,6 +25,19 @@ export default function MemoryPanel(): ReactElement {
   const handleDelete = async (id: string): Promise<void> => {
     await window.electron.deleteMemory(id)
     await refresh()
+  }
+
+  const startEditing = (memory: Memory): void => {
+    setEditingId(memory.id)
+    setEditingValue(memory.content)
+  }
+
+  const commitEditing = async (): Promise<void> => {
+    if (editingId && editingValue.trim()) {
+      await window.electron.updateMemory(editingId, editingValue.trim())
+      await refresh()
+    }
+    setEditingId(null)
   }
 
   return (
@@ -94,7 +109,32 @@ export default function MemoryPanel(): ReactElement {
               borderRadius: 10
             }}
           >
-            <span>{memory.content}</span>
+            {editingId === memory.id ? (
+              <input
+                autoFocus
+                value={editingValue}
+                onChange={(e) => setEditingValue(e.target.value)}
+                onBlur={commitEditing}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitEditing()
+                  if (e.key === 'Escape') setEditingId(null)
+                }}
+                style={{
+                  flex: 1,
+                  background: '#111827',
+                  color: 'white',
+                  border: '1px solid #2563eb',
+                  borderRadius: 6,
+                  padding: '4px 8px',
+                  fontSize: 15,
+                  marginRight: 10
+                }}
+              />
+            ) : (
+              <span onDoubleClick={() => startEditing(memory)} title="Double-click to edit">
+                {memory.content}
+              </span>
+            )}
             <button
               onClick={() => handleDelete(memory.id)}
               title="Delete memory"
@@ -103,7 +143,8 @@ export default function MemoryPanel(): ReactElement {
                 border: 'none',
                 color: '#9ca3af',
                 cursor: 'pointer',
-                fontSize: 14
+                fontSize: 14,
+                flexShrink: 0
               }}
             >
               ✕
