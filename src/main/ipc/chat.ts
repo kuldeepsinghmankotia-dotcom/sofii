@@ -173,11 +173,17 @@ async function streamAssistantReply(
     )
 
     if (toolCalls.length > 0) {
-      const toolResultMessages: ChatCompletionMessageParam[] = toolCalls.map((toolCall) => ({
-        role: 'tool',
-        tool_call_id: toolCall.id,
-        content: executeToolCall({ name: toolCall.name, argumentsJson: toolCall.argumentsJson }, db)
-      }))
+      // Independent tool calls run concurrently rather than one at a time.
+      const toolResultMessages: ChatCompletionMessageParam[] = await Promise.all(
+        toolCalls.map(async (toolCall) => ({
+          role: 'tool' as const,
+          tool_call_id: toolCall.id,
+          content: await executeToolCall(
+            { name: toolCall.name, argumentsJson: toolCall.argumentsJson },
+            db
+          )
+        }))
+      )
 
       const followUpMessages: ChatCompletionMessageParam[] = [
         ...baseMessages,

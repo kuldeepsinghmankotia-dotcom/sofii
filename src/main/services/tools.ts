@@ -2,6 +2,7 @@ import type { ChatCompletionTool } from 'openai/resources/chat/completions'
 import type { SofiiDb } from './db'
 import { scheduleReminder } from './scheduler'
 import { fireReminder } from './reminderFiring'
+import { getWeather } from './weather'
 
 export const TOOL_DEFINITIONS: ChatCompletionTool[] = [
   {
@@ -54,6 +55,24 @@ export const TOOL_DEFINITIONS: ChatCompletionTool[] = [
         required: []
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_weather',
+      description:
+        "Get the current weather and a 3-day forecast for a location. Use this whenever the user asks about weather, temperature, or whether it will rain/snow somewhere. If you don't know the user's location, ask them or check if they've told you before.",
+      parameters: {
+        type: 'object',
+        properties: {
+          location: {
+            type: 'string',
+            description: 'A city name (and optionally country), e.g. "Delhi" or "Paris, France".'
+          }
+        },
+        required: ['location']
+      }
+    }
   }
 ]
 
@@ -64,11 +83,12 @@ export interface ToolCallRequest {
 
 /**
  * Executes one tool call and returns the plain-text result to feed back to
- * the model as the tool response message. Never throws — invalid input or an
- * unknown tool name becomes an error string the model can react to instead
- * of crashing the conversation turn.
+ * the model as the tool response message. Never throws — invalid input, a
+ * network/API failure (get_weather), or an unknown tool name all become an
+ * error string the model can react to instead of crashing the conversation
+ * turn.
  */
-export function executeToolCall(request: ToolCallRequest, db: SofiiDb): string {
+export async function executeToolCall(request: ToolCallRequest, db: SofiiDb): Promise<string> {
   let args: Record<string, unknown>
 
   try {
@@ -109,6 +129,18 @@ export function executeToolCall(request: ToolCallRequest, db: SofiiDb): string {
       return pending
         .map((r) => `- "${r.content}" at ${new Date(r.scheduled_at).toLocaleString()}`)
         .join('\n')
+    }
+
+    case 'get_weather': {
+      const location = typeof args.location === 'string' ? args.location.trim() : ''
+      if (!location) return 'Error: location is required.'
+
+      try {
+        return await getWeather(location)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return `Error fetching weather: ${message}`
+      }
     }
 
     default:
