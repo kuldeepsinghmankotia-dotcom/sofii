@@ -1,28 +1,16 @@
-import { ipcMain, BrowserWindow, Notification } from 'electron'
-import { getDb, type Reminder } from '../services/db'
+import { ipcMain } from 'electron'
+import { getDb } from '../services/db'
 import { scheduleReminder, cancelReminderTimer, initScheduler } from '../services/scheduler'
-
-function handleReminderFired(reminder: Reminder): void {
-  getDb().updateReminderStatus(reminder.id, 'fired')
-
-  if (Notification.isSupported()) {
-    new Notification({ title: 'Sofii Reminder', body: reminder.content }).show()
-  }
-
-  const firedReminder: Reminder = { ...reminder, status: 'fired' }
-  for (const window of BrowserWindow.getAllWindows()) {
-    window.webContents.send('reminder:fired', firedReminder)
-  }
-}
+import { fireReminder } from '../services/reminderFiring'
 
 export function registerReminderIpc(): void {
   // Reschedules pending reminders (and immediately fires anything missed
   // while the app was closed) once, at startup.
-  initScheduler(handleReminderFired)
+  initScheduler(fireReminder)
 
   ipcMain.handle('reminder:create', (_event, content: string, scheduledAt: number) => {
     const reminder = getDb().createReminder(content, scheduledAt)
-    scheduleReminder(reminder, handleReminderFired)
+    scheduleReminder(reminder, fireReminder)
     return reminder
   })
 

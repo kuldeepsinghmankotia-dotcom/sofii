@@ -1,8 +1,22 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { randomUUID } from 'crypto'
 import { getDb, DEFAULT_CONVERSATION_TITLE, type MessageRole, type SofiiDb } from '../services/db'
-import { getGroqClient, GROQ_MODEL, SYSTEM_PROMPT } from '../services/groqClient'
+import type {
+  ChatCompletionCreateParamsStreaming,
+  ChatCompletionCreateParamsNonStreaming,
+  ChatCompletionMessageParam,
+  ChatCompletionTool,
+  ChatCompletionToolChoiceOption
+} from 'openai/resources/chat/completions'
+import {
+  getGroqClient,
+  getGroqModel,
+  SYSTEM_PROMPT,
+  SUPPRESS_REASONING,
+  type GroqReasoningParams
+} from '../services/groqClient'
 import { rankMemoriesByRelevance } from '../services/memoryRanking'
+import { TOOL_DEFINITIONS, executeToolCall } from '../services/tools'
 import log from '../lib/logger'
 
 const scope = log.scope('chat-ipc')
@@ -47,6 +61,64 @@ export function registerChatIpc(): void {
   )
 }
 
+interface AccumulatedToolCall {
+  id: string
+  name: string
+  argumentsJson: string
+}
+
+/**
+ * Runs one streamed completion call, forwarding content deltas to the
+ * renderer as they arrive and accumulating any tool_calls deltas (Groq has
+ * been observed to send a tool call's full id/name/arguments in a single
+ * chunk, but this accumulates defensively by index in case that changes).
+ */
+async function streamCompletion(
+  event: IpcMainInvokeEvent,
+  channel: string,
+  messages: ChatCompletionMessageParam[],
+  toolOptions: { tools?: ChatCompletionTool[]; tool_choice?: ChatCompletionToolChoiceOption },
+  onContent: (delta: string) => void
+): Promise<AccumulatedToolCall[]> {
+  const stream = await getGroqClient().chat.completions.create({
+    model: getGroqModel(),
+    messages,
+    temperature: 0.7,
+    max_tokens: 1024,
+    stream: true,
+    ...SUPPRESS_REASONING,
+    ...toolOptions
+  } as ChatCompletionCreateParamsStreaming & GroqReasoningParams)
+
+  const toolCallsByIndex = new Map<number, AccumulatedToolCall>()
+
+  for await (const chunk of stream) {
+    const delta = chunk.choices[0]?.delta
+
+    if (delta?.content) {
+      onContent(delta.content)
+      event.sender.send(channel, { type: 'chunk', delta: delta.content })
+    }
+
+    if (delta?.tool_calls) {
+      for (const toolCallDelta of delta.tool_calls) {
+        const existing = toolCallsByIndex.get(toolCallDelta.index) ?? {
+          id: '',
+          name: '',
+          argumentsJson: ''
+        }
+        if (toolCallDelta.id) existing.id = toolCallDelta.id
+        if (toolCallDelta.function?.name) existing.name = toolCallDelta.function.name
+        if (toolCallDelta.function?.arguments)
+          existing.argumentsJson += toolCallDelta.function.arguments
+        toolCallsByIndex.set(toolCallDelta.index, existing)
+      }
+    }
+  }
+
+  return Array.from(toolCallsByIndex.values())
+}
+
 async function streamAssistantReply(
   event: IpcMainInvokeEvent,
   conversationId: string,
@@ -74,28 +146,58 @@ async function streamAssistantReply(
   const shouldAutoTitle =
     conversation.messages.length === 1 && conversation.title === DEFAULT_CONVERSATION_TITLE
 
+  // The model needs "now" to resolve relative times ("in 10 minutes",
+  // "tomorrow at 5pm") into the absolute ISO timestamp create_reminder needs.
+  const systemPromptWithTime = `${SYSTEM_PROMPT}\n\nThe current date and time is ${new Date().toString()}.`
   const systemPrompt =
     relevantMemories.length > 0
-      ? `${SYSTEM_PROMPT}\n\nThings you remember about the user (only mention if relevant):\n${relevantMemories.map((m) => `- ${m.content}`).join('\n')}`
-      : SYSTEM_PROMPT
+      ? `${systemPromptWithTime}\n\nThings you remember about the user (only mention if relevant):\n${relevantMemories.map((m) => `- ${m.content}`).join('\n')}`
+      : systemPromptWithTime
+
+  const baseMessages: ChatCompletionMessageParam[] = [
+    { role: 'system', content: systemPrompt },
+    ...history
+  ]
 
   try {
-    const stream = await getGroqClient().chat.completions.create({
-      model: GROQ_MODEL,
-      messages: [{ role: 'system', content: systemPrompt }, ...history],
-      temperature: 0.7,
-      max_tokens: 1024,
-      stream: true
-    })
-
     let fullContent = ''
 
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta?.content
-      if (delta) {
+    const toolCalls = await streamCompletion(
+      event,
+      channel,
+      baseMessages,
+      { tools: TOOL_DEFINITIONS, tool_choice: 'auto' },
+      (delta) => {
         fullContent += delta
-        event.sender.send(channel, { type: 'chunk', delta })
       }
+    )
+
+    if (toolCalls.length > 0) {
+      const toolResultMessages: ChatCompletionMessageParam[] = toolCalls.map((toolCall) => ({
+        role: 'tool',
+        tool_call_id: toolCall.id,
+        content: executeToolCall({ name: toolCall.name, argumentsJson: toolCall.argumentsJson }, db)
+      }))
+
+      const followUpMessages: ChatCompletionMessageParam[] = [
+        ...baseMessages,
+        {
+          role: 'assistant',
+          content: fullContent || null,
+          tool_calls: toolCalls.map((toolCall) => ({
+            id: toolCall.id,
+            type: 'function',
+            function: { name: toolCall.name, arguments: toolCall.argumentsJson }
+          }))
+        },
+        ...toolResultMessages
+      ]
+
+      // Bounded to exactly one tool round: no `tools` option here, so the
+      // model has nothing left to call and must produce a final reply.
+      await streamCompletion(event, channel, followUpMessages, {}, (delta) => {
+        fullContent += delta
+      })
     }
 
     db.insertMessage(conversationId, 'assistant', fullContent || 'No response received.')
@@ -120,7 +222,7 @@ async function autoTitleConversation(
 ): Promise<void> {
   try {
     const response = await getGroqClient().chat.completions.create({
-      model: GROQ_MODEL,
+      model: getGroqModel(),
       messages: [
         {
           role: 'system',
@@ -130,8 +232,13 @@ async function autoTitleConversation(
         { role: 'user', content: `User: ${userContent}\nAssistant: ${assistantContent}` }
       ],
       temperature: 0.3,
-      max_tokens: 20
-    })
+      // Hidden reasoning tokens count against max_tokens even with
+      // include_reasoning: false (verified against the live API — ~20-30
+      // reasoning tokens for this prompt), so this needs real headroom above
+      // the actual title length or the response gets truncated to empty.
+      max_tokens: 150,
+      ...SUPPRESS_REASONING
+    } as ChatCompletionCreateParamsNonStreaming & GroqReasoningParams)
 
     const title = response.choices[0]?.message?.content?.trim().replace(/^["']|["']$/g, '')
     if (title) db.renameConversation(conversationId, title)
