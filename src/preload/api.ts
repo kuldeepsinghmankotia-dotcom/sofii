@@ -36,6 +36,10 @@ export type StreamEvent =
   | { type: 'done'; fullContent: string }
   | { type: 'error'; error: string }
 
+export interface TranscriptionResult {
+  text: string
+}
+
 export interface SofiiElectronAPI {
   createConversation: () => Promise<Conversation>
   listConversations: () => Promise<ConversationSummary[]>
@@ -44,4 +48,5 @@ export interface SofiiElectronAPI {
   deleteConversation: (conversationId: string) => Promise<{ ok: true }>
   sendMessage: (conversationId: string, content: string) => Promise<SendMessageResult>
   onStreamChunk: (streamId: string, callback: (event: StreamEvent) => void) => () => void
+  transcribeAudio: (audio: ArrayBuffer, mimeType: string) => Promise<TranscriptionResult>
 }

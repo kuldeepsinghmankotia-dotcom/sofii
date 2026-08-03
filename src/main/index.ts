@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow } from 'electron'
+import { app, session, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -7,6 +7,7 @@ import { loadEnv } from './lib/env'
 import log from './lib/logger'
 import { initDb } from './services/db'
 import { registerChatIpc } from './ipc/chat'
+import { registerVoiceIpc } from './ipc/voice'
 
 loadEnv()
 
@@ -42,7 +43,15 @@ function createWindow(): void {
 app.whenReady().then(() => {
   initDb(join(app.getPath('userData'), 'sofii.db'))
   registerChatIpc()
+  registerVoiceIpc()
   log.info('Sofii ready, database initialized at', join(app.getPath('userData'), 'sofii.db'))
+
+  // This is a single-user local desktop app (not an arbitrary website), so
+  // granting its own renderer microphone access for push-to-talk is safe;
+  // Electron denies all permission requests by default otherwise.
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    callback(permission === 'media')
+  })
 
   electronApp.setAppUserModelId('com.electron')
 

@@ -10,7 +10,12 @@ export default function ChatWindow({ conversationId, onActivity }: Props): React
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [title, setTitle] = useState('')
+  const [isRecording, setIsRecording] = useState(false)
+  const [isTranscribing, setIsTranscribing] = useState(false)
+  const [speakEnabled, setSpeakEnabled] = useState(false)
   const unsubscribeRef = useRef<(() => void) | null>(null)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<BlobPart[]>([])
 
   useEffect(() => {
     if (!conversationId) return
@@ -31,14 +36,28 @@ export default function ChatWindow({ conversationId, onActivity }: Props): React
   useEffect(() => {
     return () => {
       unsubscribeRef.current?.()
+      window.speechSynthesis.cancel()
     }
   }, [])
 
-  const sendMessage = async (): Promise<void> => {
-    if (!input.trim() || !conversationId) return
+  const speak = (text: string): void => {
+    if (!speakEnabled || !text.trim()) return
+    window.speechSynthesis.cancel()
+    window.speechSynthesis.speak(new SpeechSynthesisUtterance(text))
+  }
 
-    const content = input
-    setInput('')
+  const addSystemNote = (content: string): void => {
+    setMessages((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), role: 'assistant', content, created_at: Date.now() }
+    ])
+  }
+
+  const sendMessage = async (overrideContent?: string): Promise<void> => {
+    const content = overrideContent ?? input
+    if (!content.trim() || !conversationId) return
+
+    if (overrideContent === undefined) setInput('')
 
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
@@ -58,10 +77,12 @@ export default function ChatWindow({ conversationId, onActivity }: Props): React
     setMessages((prev) => [...prev, userMessage, assistantPlaceholder])
 
     const { streamId } = await window.electron.sendMessage(conversationId, content)
+    let fullContent = ''
 
     unsubscribeRef.current?.()
     unsubscribeRef.current = window.electron.onStreamChunk(streamId, (event) => {
       if (event.type === 'chunk') {
+        fullContent += event.delta
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantMessageId ? { ...m, content: m.content + event.delta } : m
@@ -71,6 +92,7 @@ export default function ChatWindow({ conversationId, onActivity }: Props): React
         unsubscribeRef.current?.()
         unsubscribeRef.current = null
         onActivity?.()
+        speak(fullContent)
       } else if (event.type === 'error') {
         setMessages((prev) =>
           prev.map((m) => (m.id === assistantMessageId ? { ...m, content: event.error } : m))
@@ -79,6 +101,48 @@ export default function ChatWindow({ conversationId, onActivity }: Props): React
         unsubscribeRef.current = null
       }
     })
+  }
+
+  const toggleRecording = async (): Promise<void> => {
+    if (isRecording) {
+      mediaRecorderRef.current?.stop()
+      setIsRecording(false)
+      return
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' })
+      audioChunksRef.current = []
+
+      recorder.ondataavailable = (e): void => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data)
+      }
+
+      recorder.onstop = async (): Promise<void> => {
+        stream.getTracks().forEach((track) => track.stop())
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+        const arrayBuffer = await blob.arrayBuffer()
+
+        setIsTranscribing(true)
+        try {
+          const { text } = await window.electron.transcribeAudio(arrayBuffer, 'audio/webm')
+          if (text.trim()) await sendMessage(text.trim())
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          addSystemNote(`Transcription failed: ${message}`)
+        } finally {
+          setIsTranscribing(false)
+        }
+      }
+
+      mediaRecorderRef.current = recorder
+      recorder.start()
+      setIsRecording(true)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      addSystemNote(`Microphone unavailable: ${message}`)
+    }
   }
 
   if (!conversationId) {
@@ -104,10 +168,30 @@ export default function ChatWindow({ conversationId, onActivity }: Props): React
           padding: 20,
           fontSize: 20,
           fontWeight: 'bold',
-          borderBottom: '1px solid #374151'
+          borderBottom: '1px solid #374151',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between'
         }}
       >
-        {title || '🤖 Sofii AI'}
+        <span>{title || '🤖 Sofii AI'}</span>
+        <button
+          onClick={() => {
+            setSpeakEnabled((prev) => {
+              if (prev) window.speechSynthesis.cancel()
+              return !prev
+            })
+          }}
+          title={speakEnabled ? 'Spoken replies on' : 'Spoken replies off'}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            fontSize: 18
+          }}
+        >
+          {speakEnabled ? '🔊' : '🔇'}
+        </button>
       </div>
 
       <div
@@ -135,9 +219,29 @@ export default function ChatWindow({ conversationId, onActivity }: Props): React
             {msg.content}
           </div>
         ))}
+        {isTranscribing && (
+          <div style={{ alignSelf: 'flex-end', color: '#9ca3af', fontSize: 14 }}>Transcribing…</div>
+        )}
       </div>
 
       <div style={{ display: 'flex', padding: 15, gap: 10 }}>
+        <button
+          onClick={toggleRecording}
+          disabled={isTranscribing}
+          title={isRecording ? 'Stop recording' : 'Start recording'}
+          style={{
+            background: isRecording ? '#dc2626' : '#374151',
+            color: 'white',
+            border: 'none',
+            borderRadius: 10,
+            padding: '12px 16px',
+            cursor: isTranscribing ? 'default' : 'pointer',
+            opacity: isTranscribing ? 0.6 : 1
+          }}
+        >
+          {isRecording ? '⏹' : '🎙️'}
+        </button>
+
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -156,7 +260,7 @@ export default function ChatWindow({ conversationId, onActivity }: Props): React
         />
 
         <button
-          onClick={sendMessage}
+          onClick={() => sendMessage()}
           style={{
             background: '#2563eb',
             color: 'white',

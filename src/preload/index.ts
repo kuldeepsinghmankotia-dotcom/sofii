@@ -22,7 +22,9 @@ const api: SofiiElectronAPI = {
     const listener = (_: Electron.IpcRendererEvent, data: StreamEvent): void => callback(data)
     ipcRenderer.on(channel, listener)
     return () => ipcRenderer.removeListener(channel, listener)
-  }
+  },
+
+  transcribeAudio: (audio, mimeType) => ipcRenderer.invoke('voice:transcribe', audio, mimeType)
 }
 
 contextBridge.exposeInMainWorld('electron', api)
