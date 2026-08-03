@@ -7,6 +7,8 @@ type Props = {
   onSelect: (id: string) => void
   onCreate: () => void
   onDelete: (id: string) => void
+  view: 'chat' | 'memories'
+  onToggleView: () => void
 }
 
 export default function ConversationList({
@@ -14,7 +16,9 @@ export default function ConversationList({
   selectedId,
   onSelect,
   onCreate,
-  onDelete
+  onDelete,
+  view,
+  onToggleView
 }: Props): ReactElement {
   return (
     <div
@@ -26,7 +30,7 @@ export default function ConversationList({
         flexDirection: 'column'
       }}
     >
-      <div style={{ padding: 12 }}>
+      <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
         <button
           onClick={onCreate}
           style={{
@@ -41,6 +45,22 @@ export default function ConversationList({
           }}
         >
           + New conversation
+        </button>
+
+        <button
+          onClick={onToggleView}
+          style={{
+            width: '100%',
+            background: view === 'memories' ? '#1f2937' : 'transparent',
+            color: 'white',
+            border: '1px solid #374151',
+            borderRadius: 10,
+            padding: '10px 12px',
+            cursor: 'pointer',
+            fontSize: 14
+          }}
+        >
+          {view === 'memories' ? '💬 Back to chats' : '🧠 Memories'}
         </button>
       </div>
 

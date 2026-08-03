@@ -54,4 +54,33 @@ describe('SofiiDb', () => {
     db.deleteConversation(conversation.id)
     expect(db.getConversation(conversation.id)).toBeUndefined()
   })
+
+  it('creates and lists memories ordered by most recently updated', () => {
+    const first = db.createMemory('Likes TypeScript')
+    const startMs = Date.now()
+    while (Date.now() === startMs) {
+      // busy-wait to guarantee a distinct millisecond for the second insert,
+      // since ordering here is by updated_at (Date.now()), not insertion order
+    }
+    const second = db.createMemory('Lives in Delhi')
+
+    const list = db.listMemories()
+    expect(list.map((m) => m.id)).toEqual([second.id, first.id])
+    expect(list.map((m) => m.content)).toEqual(['Lives in Delhi', 'Likes TypeScript'])
+  })
+
+  it('updates a memory and bumps its updated_at', () => {
+    const memory = db.createMemory('Old fact')
+    db.updateMemory(memory.id, 'New fact')
+
+    const [updated] = db.listMemories()
+    expect(updated.content).toBe('New fact')
+    expect(updated.updated_at).toBeGreaterThanOrEqual(memory.updated_at)
+  })
+
+  it('deletes a memory', () => {
+    const memory = db.createMemory('Temporary fact')
+    db.deleteMemory(memory.id)
+    expect(db.listMemories()).toEqual([])
+  })
 })

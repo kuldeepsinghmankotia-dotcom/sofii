@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Sofii is a local-first Electron desktop AI assistant (React + TypeScript, built with `electron-vite`), single-user with no accounts/auth/hosted backend. Conversations and messages persist locally in SQLite. The renderer sends chat messages to the main process over IPC; the main process persists them, streams a reply from Groq's OpenAI-compatible chat completions API (`llama-3.3-70b-versatile`), and pushes tokens back to the renderer as they arrive. Push-to-talk voice input (Groq-hosted Whisper) and local text-to-speech (Web Speech Synthesis) are also implemented — see Architecture below.
+Sofii is a local-first Electron desktop AI assistant (React + TypeScript, built with `electron-vite`), single-user with no accounts/auth/hosted backend. Conversations and messages persist locally in SQLite. The renderer sends chat messages to the main process over IPC; the main process persists them, streams a reply from Groq's OpenAI-compatible chat completions API (`llama-3.3-70b-versatile`), and pushes tokens back to the renderer as they arrive. Push-to-talk voice input (Groq-hosted Whisper), local text-to-speech (Web Speech Synthesis), and a local long-term memory system (keyword-recall, no embeddings) are also implemented — see Architecture below.
 
-This app is being built incrementally against a much larger long-term product vision (long-term memory/knowledge graph, automation/agents, etc. — see prior planning discussions). Later phases are not yet built and should follow the same local-first, free/open-source-first, no-auth approach unless explicitly reconsidered.
+This app is being built incrementally against a much larger long-term product vision (automation/agents, etc. — see prior planning discussions). Later phases are not yet built and should follow the same local-first, free/open-source-first, no-auth approach unless explicitly reconsidered.
 
 ## Commands
 
@@ -37,20 +37,24 @@ src/main/
     env.ts        #   dotenv loading wrapper (loadEnv())
     logger.ts     #   electron-log scoped logger (writes to OS log dir + console)
   services/       # framework-agnostic business logic (electron-import-free except app.getPath)
-    db.ts         #   SofiiDb class: better-sqlite3 conversations/messages CRUD + schema init
+    db.ts         #   SofiiDb class: better-sqlite3 conversations/messages/memories CRUD + schema init
     db.test.ts    #   Vitest tests for db.ts, using in-memory (:memory:) SQLite
     groqClient.ts #   lazily-constructed Groq/OpenAI SDK client (see note below)
+    memoryRanking.ts      # pure keyword-overlap relevance scoring for memory recall (see note below)
+    memoryRanking.test.ts #   Vitest tests, no DB/Electron involved
   ipc/            # ipcMain handlers only — translate IPC <-> services, no business logic
-    chat.ts       #   chat:* channels: conversation CRUD + streaming send-message
+    chat.ts       #   chat:* channels: conversation CRUD + streaming send-message (also recalls memories)
     voice.ts      #   voice:transcribe channel: Groq-hosted Whisper transcription
+    memory.ts     #   memory:* channels: memory CRUD
 src/preload/
   index.ts        # contextBridge surface, thin — implements SofiiElectronAPI
   index.d.ts      # declares global window.electron: SofiiElectronAPI
   api.ts          # SofiiElectronAPI interface + shared types (Conversation, ChatMessage, StreamEvent, ...) — single source of truth for the renderer-visible API surface
 src/renderer/src/
-  App.tsx                      # shell: selected conversation state + layout
-  components/ConversationList.tsx  # sidebar: list/select/create/delete conversations
+  App.tsx                      # shell: selected conversation state, chat/memories view switch + layout
+  components/ConversationList.tsx  # sidebar: list/select/create/delete conversations + view toggle
   components/ChatWindow.tsx        # message list + composer for the selected conversation
+  components/MemoryPanel.tsx       # list/add/delete long-term memories
 ```
 
 Convention when adding new main-process subsystems (voice, memory, etc. in later phases): follow this same `lib/` (helpers) / `services/` (logic, unit-testable, no Electron-specific imports beyond `app.getPath`) / `ipc/` (thin handler registration) split rather than growing `index.ts` or inlining logic into IPC handlers.
@@ -63,6 +67,8 @@ Convention when adding new main-process subsystems (voice, memory, etc. in later
 **Groq client note**: `getGroqClient()` in `groqClient.ts` constructs the `OpenAI` client lazily on first call, not at module load. ES module imports are hoisted/evaluated before `index.ts`'s own top-level `loadEnv()` call runs, so an eagerly-constructed client at import time would read `GROQ_API_KEY` before `.env` is loaded — this bit us once already; keep it lazy.
 
 **Voice**: push-to-talk, not wake-word/always-listening (no background audio capture). Renderer records via `getUserMedia` + `MediaRecorder` (`audio/webm;codecs=opus`), sends the raw `ArrayBuffer` over `window.electron.transcribeAudio(audio, mimeType)` → `voice:transcribe` → Groq's hosted `whisper-large-v3-turbo` endpoint (via `openai`'s `toFile()` helper, same `GROQ_API_KEY`). The transcript is then sent through the normal `sendMessage` flow, same as typed input. This is a deliberate trade-off: Groq's free tier (2000 transcriptions/day, no credit card) avoids requiring a local whisper.cpp build + ffmpeg + large model download, at the cost of audio leaving the device — swap out `voice.ts` for a local STT engine later if that trade-off changes. Text-to-speech is fully local/offline: `window.speechSynthesis`/`SpeechSynthesisUtterance` (Web Speech API) in `ChatWindow.tsx`, toggled per-window, uses OS-installed voices, zero new dependencies. Mic access requires `session.defaultSession.setPermissionRequestHandler` in `main/index.ts` (Electron denies `media` permission requests by default).
+
+**Memory**: explicit only — the user adds/deletes memories themselves via the "🧠 Memories" view (`MemoryPanel.tsx`, toggled in `App.tsx`/`ConversationList.tsx`); there's no automatic inference/extraction of memories from conversation content (that's a fuzzier, LLM-classification-driven feature, deferred). Retrieval is **keyword-overlap scoring in plain JS** (`memoryRanking.ts`'s `rankMemoriesByRelevance`), not semantic/vector search — a deliberate trade-off to avoid a ~200MB local embedding runtime (`@huggingface/transformers`/onnxruntime-node) with real Electron native-module-rebuild risk and a first-run model download, similar reasoning to the voice STT trade-off above. Fine at single-user local scale (dozens–hundreds of memories); swap in embeddings behind the same `rankMemoriesByRelevance(memories, query, limit)` signature later if needed. `chat.ts`'s `streamAssistantReply` calls this with the latest user message as the query and injects any matches (score > 0 only) into the system prompt before calling Groq — silently a no-op when no memories match or none exist yet.
 
 **Storage**: `better-sqlite3` database at `app.getPath('userData')/sofii.db` (WAL mode), schema created idempotently (`CREATE TABLE IF NOT EXISTS`) on `initDb()` at startup — no migration framework yet, single-user so no `user_id` column.
 

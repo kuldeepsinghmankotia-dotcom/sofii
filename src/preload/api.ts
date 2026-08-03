@@ -40,6 +40,13 @@ export interface TranscriptionResult {
   text: string
 }
 
+export interface Memory {
+  id: string
+  content: string
+  created_at: number
+  updated_at: number
+}
+
 export interface SofiiElectronAPI {
   createConversation: () => Promise<Conversation>
   listConversations: () => Promise<ConversationSummary[]>
@@ -49,4 +56,8 @@ export interface SofiiElectronAPI {
   sendMessage: (conversationId: string, content: string) => Promise<SendMessageResult>
   onStreamChunk: (streamId: string, callback: (event: StreamEvent) => void) => () => void
   transcribeAudio: (audio: ArrayBuffer, mimeType: string) => Promise<TranscriptionResult>
+  createMemory: (content: string) => Promise<Memory>
+  listMemories: () => Promise<Memory[]>
+  updateMemory: (memoryId: string, content: string) => Promise<{ ok: true }>
+  deleteMemory: (memoryId: string) => Promise<{ ok: true }>
 }

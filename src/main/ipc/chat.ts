@@ -2,9 +2,11 @@ import { ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { randomUUID } from 'crypto'
 import { getDb, type MessageRole } from '../services/db'
 import { getGroqClient, GROQ_MODEL, SYSTEM_PROMPT } from '../services/groqClient'
+import { rankMemoriesByRelevance } from '../services/memoryRanking'
 import log from '../lib/logger'
 
 const scope = log.scope('chat-ipc')
+const MEMORY_RECALL_LIMIT = 5
 
 export function registerChatIpc(): void {
   ipcMain.handle('chat:create-conversation', () => {
@@ -64,10 +66,20 @@ async function streamAssistantReply(
     content: m.content
   }))
 
+  const latestUserMessage = [...conversation.messages].reverse().find((m) => m.role === 'user')
+  const relevantMemories = latestUserMessage
+    ? rankMemoriesByRelevance(db.listMemories(), latestUserMessage.content, MEMORY_RECALL_LIMIT)
+    : []
+
+  const systemPrompt =
+    relevantMemories.length > 0
+      ? `${SYSTEM_PROMPT}\n\nThings you remember about the user (only mention if relevant):\n${relevantMemories.map((m) => `- ${m.content}`).join('\n')}`
+      : SYSTEM_PROMPT
+
   try {
     const stream = await getGroqClient().chat.completions.create({
       model: GROQ_MODEL,
-      messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...history],
+      messages: [{ role: 'system', content: systemPrompt }, ...history],
       temperature: 0.7,
       max_tokens: 1024,
       stream: true

@@ -8,6 +8,7 @@ import log from './lib/logger'
 import { initDb } from './services/db'
 import { registerChatIpc } from './ipc/chat'
 import { registerVoiceIpc } from './ipc/voice'
+import { registerMemoryIpc } from './ipc/memory'
 
 loadEnv()
 
@@ -44,6 +45,7 @@ app.whenReady().then(() => {
   initDb(join(app.getPath('userData'), 'sofii.db'))
   registerChatIpc()
   registerVoiceIpc()
+  registerMemoryIpc()
   log.info('Sofii ready, database initialized at', join(app.getPath('userData'), 'sofii.db'))
 
   // This is a single-user local desktop app (not an arbitrary website), so

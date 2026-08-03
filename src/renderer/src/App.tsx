@@ -1,11 +1,15 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import ConversationList from './components/ConversationList'
 import ChatWindow from './components/ChatWindow'
+import MemoryPanel from './components/MemoryPanel'
 import type { ConversationSummary } from '../../preload/api'
+
+type View = 'chat' | 'memories'
 
 export default function App(): ReactElement {
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [view, setView] = useState<View>('chat')
 
   const refreshConversations = async (): Promise<ConversationSummary[]> => {
     const list = await window.electron.listConversations()
@@ -48,15 +52,24 @@ export default function App(): ReactElement {
       <ConversationList
         conversations={conversations}
         selectedId={selectedId}
-        onSelect={setSelectedId}
+        onSelect={(id) => {
+          setView('chat')
+          setSelectedId(id)
+        }}
         onCreate={handleCreate}
         onDelete={handleDelete}
+        view={view}
+        onToggleView={() => setView((v) => (v === 'chat' ? 'memories' : 'chat'))}
       />
-      <ChatWindow
-        key={selectedId ?? 'none'}
-        conversationId={selectedId}
-        onActivity={refreshConversations}
-      />
+      {view === 'memories' ? (
+        <MemoryPanel />
+      ) : (
+        <ChatWindow
+          key={selectedId ?? 'none'}
+          conversationId={selectedId}
+          onActivity={refreshConversations}
+        />
+      )}
     </div>
   )
 }

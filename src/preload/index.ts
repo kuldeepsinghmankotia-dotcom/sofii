@@ -24,7 +24,15 @@ const api: SofiiElectronAPI = {
     return () => ipcRenderer.removeListener(channel, listener)
   },
 
-  transcribeAudio: (audio, mimeType) => ipcRenderer.invoke('voice:transcribe', audio, mimeType)
+  transcribeAudio: (audio, mimeType) => ipcRenderer.invoke('voice:transcribe', audio, mimeType),
+
+  createMemory: (content) => ipcRenderer.invoke('memory:create', content),
+
+  listMemories: () => ipcRenderer.invoke('memory:list'),
+
+  updateMemory: (memoryId, content) => ipcRenderer.invoke('memory:update', memoryId, content),
+
+  deleteMemory: (memoryId) => ipcRenderer.invoke('memory:delete', memoryId)
 }
 
 contextBridge.exposeInMainWorld('electron', api)

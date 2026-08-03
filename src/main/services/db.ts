@@ -30,6 +30,13 @@ export interface ConversationWithMessages {
   messages: Omit<ChatMessage, 'conversation_id'>[]
 }
 
+export interface Memory {
+  id: string
+  content: string
+  created_at: number
+  updated_at: number
+}
+
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS conversations (
     id         TEXT PRIMARY KEY,
@@ -47,6 +54,13 @@ const SCHEMA = `
   );
 
   CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at);
+
+  CREATE TABLE IF NOT EXISTS memories (
+    id         TEXT PRIMARY KEY,
+    content    TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
 `
 
 export class SofiiDb {
@@ -129,6 +143,35 @@ export class SofiiDb {
       .run(message.created_at, conversationId)
 
     return message
+  }
+
+  createMemory(content: string): Memory {
+    const now = Date.now()
+    const memory: Memory = { id: randomUUID(), content, created_at: now, updated_at: now }
+
+    this.db
+      .prepare(
+        `INSERT INTO memories (id, content, created_at, updated_at) VALUES (@id, @content, @created_at, @updated_at)`
+      )
+      .run(memory)
+
+    return memory
+  }
+
+  listMemories(): Memory[] {
+    return this.db
+      .prepare(`SELECT id, content, created_at, updated_at FROM memories ORDER BY updated_at DESC`)
+      .all() as Memory[]
+  }
+
+  updateMemory(memoryId: string, content: string): void {
+    this.db
+      .prepare(`UPDATE memories SET content = ?, updated_at = ? WHERE id = ?`)
+      .run(content, Date.now(), memoryId)
+  }
+
+  deleteMemory(memoryId: string): void {
+    this.db.prepare(`DELETE FROM memories WHERE id = ?`).run(memoryId)
   }
 
   close(): void {
