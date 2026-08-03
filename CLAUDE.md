@@ -49,21 +49,25 @@ src/main/
     tools.test.ts          #   Vitest tests using vi.useFakeTimers(), no Electron involved; mocks global.fetch for the get_weather case
     weather.ts             # get_weather's implementation: free, no-API-key Open-Meteo geocoding + forecast (see Tool-calling note below)
     weather.test.ts        #   Vitest tests with global.fetch mocked — no real network calls in the test suite
+    settings.ts            # userData/config.json read/write for the Groq API key (see Environment section below)
+    settings.test.ts        #   Vitest tests with 'electron' module mocked (app.getPath only) — real fs I/O against a temp dir
   ipc/            # ipcMain handlers only — translate IPC <-> services, no business logic
     chat.ts       #   chat:* channels: conversation CRUD + streaming send-message (also recalls memories, runs tool-calling)
     voice.ts      #   voice:transcribe channel: Groq-hosted Whisper transcription
     memory.ts     #   memory:* channels: memory CRUD
     reminders.ts  #   reminder:* channels: reminder CRUD + wires scheduler to reminderFiring.fireReminder
+    settings.ts   #   settings:* channels: has-api-key / set-api-key
 src/preload/
   index.ts        # contextBridge surface, thin — implements SofiiElectronAPI
   index.d.ts      # declares global window.electron: SofiiElectronAPI
   api.ts          # SofiiElectronAPI interface + shared types (Conversation, ChatMessage, StreamEvent, ...) — single source of truth for the renderer-visible API surface
 src/renderer/src/
-  App.tsx                      # shell: selected conversation state, chat/memories view switch + layout
+  App.tsx                      # shell: selected conversation state, chat/memories/reminders/settings view switch + layout
   components/ConversationList.tsx  # sidebar: list/select/create/delete conversations + view toggle
   components/ChatWindow.tsx        # message list + composer for the selected conversation
   components/MemoryPanel.tsx       # list/add/delete long-term memories
   components/ReminderPanel.tsx     # list/add/cancel/delete reminders
+  components/SettingsPanel.tsx     # Groq API key entry/status
 ```
 
 Convention when adding new main-process subsystems (voice, memory, etc. in later phases): follow this same `lib/` (helpers) / `services/` (logic, unit-testable, no Electron-specific imports beyond `app.getPath`) / `ipc/` (thin handler registration) split rather than growing `index.ts` or inlining logic into IPC handlers.
@@ -89,11 +93,16 @@ Convention when adding new main-process subsystems (voice, memory, etc. in later
 
 **Storage**: `better-sqlite3` database at `app.getPath('userData')/sofii.db` (WAL mode), schema created idempotently (`CREATE TABLE IF NOT EXISTS`) on `initDb()` at startup — no migration framework yet, single-user so no `user_id` column.
 
-Config/build wiring: `electron.vite.config.ts` defines the three build targets (main/preload/renderer) and the `@renderer` alias to `src/renderer/src`; `tsconfig.node.json` (main/preload) and `tsconfig.web.json` (renderer) extend `@electron-toolkit/tsconfig` presets and are referenced from the root `tsconfig.json`; `vitest.config.ts` targets `src/main/**/*.test.ts`. `electron-builder.yml` controls packaging (excludes `.env*`, `src/*`, config files from the shipped app; mac entitlements request camera/mic/documents/downloads access even though the app doesn't currently use them — revisit once voice/file features land).
+Config/build wiring: `electron.vite.config.ts` defines the three build targets (main/preload/renderer) and the `@renderer` alias to `src/renderer/src`; `tsconfig.node.json` (main/preload) and `tsconfig.web.json` (renderer) extend `@electron-toolkit/tsconfig` presets and are referenced from the root `tsconfig.json`; `vitest.config.ts` targets `src/main/**/*.test.ts`. `electron-builder.yml` controls packaging (excludes `.env*`, `src/*`, config files from the shipped app; mac entitlements request camera/mic/documents/downloads access, genuinely needed now that voice/mic push-to-talk exists).
+
+**Packaging**: `npm run build:mac` produces a real, launchable `.app` (plus `.dmg`/`.zip`) in `dist/mac-arm64/` (gitignored — regenerate, don't commit). `notarize: false` and no Apple Developer identity means the app is unsigned — macOS Gatekeeper will warn on first launch (right-click → Open works around it); this is expected for a personal/unsigned build, not a bug. `npmRebuild: false` in `electron-builder.yml` means it does **not** re-rebuild native modules (`better-sqlite3`) for packaging — relies on the ABI already matching from `postinstall`'s `electron-builder install-app-deps` after `npm install`, which it does in practice (verified: the packaged app's SQLite operations work). The DMG-building step (`hdiutil`/Python `dmgbuild`) can intermittently fail in constrained/sandboxed environments even when the underlying `.app` bundle builds fine — check `dist/mac-arm64/*.app` directly if the `.dmg` step errors out. First real packaged-build test surfaced a genuine bug: the packaged app has no `.env` (see Environment section) and originally had no way to configure `GROQ_API_KEY` at all — that's what motivated the Settings view.
 
 ## Environment
 
-Requires a `GROQ_API_KEY` in `.env` (loaded via `dotenv` in `src/main/lib/env.ts`, `override: true`; see `.env.example` for the template). Never commit `.env` (git-ignored) or log its contents beyond the existing presence check.
+Requires a `GROQ_API_KEY`. Two sources, in priority order:
+
+1. `.env` in the repo root (dev only — loaded via `dotenv` in `src/main/lib/env.ts`, `override: true`; see `.env.example` for the template). Never commit `.env` (git-ignored) or log its contents beyond the existing presence check.
+2. A key entered in the app's Settings view (⚙️), persisted to `app.getPath('userData')/config.json` — this is the **only** option for a packaged build, since `electron-builder.yml` deliberately excludes `.env*` from what ships (a developer's own key must never end up inside a distributed binary). `applyStoredApiKey()` in `src/main/services/settings.ts` runs once at startup and only falls back to the saved config if `.env` didn't already provide a key, so dev workflow is unaffected. `App.tsx` checks `hasApiKey()` on load and defaults to the Settings view if nothing is configured yet, instead of landing on a chat screen that can't actually reach Groq. Saving a new key also calls `resetGroqClient()` (`groqClient.ts`) so it takes effect immediately, no restart needed. Both directions of this precedence were verified end-to-end on the real packaged app and real dev app (not just unit tests) — see `settings.test.ts` for the mocked-`electron` unit coverage.
 
 ## Style
 

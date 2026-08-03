@@ -3,12 +3,22 @@ import ConversationList, { type View } from './components/ConversationList'
 import ChatWindow from './components/ChatWindow'
 import MemoryPanel from './components/MemoryPanel'
 import ReminderPanel from './components/ReminderPanel'
+import SettingsPanel from './components/SettingsPanel'
 import type { ConversationSummary } from '../../preload/api'
 
 export default function App(): ReactElement {
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [view, setView] = useState<View>('chat')
+
+  useEffect(() => {
+    // First run / no key configured yet (e.g. a packaged build with no
+    // bundled .env): land on Settings instead of a chat screen that can't
+    // actually talk to Groq.
+    window.electron.hasApiKey().then((hasKey) => {
+      if (!hasKey) setView('settings')
+    })
+  }, [])
 
   const refreshConversations = async (): Promise<ConversationSummary[]> => {
     const list = await window.electron.listConversations()
@@ -68,6 +78,7 @@ export default function App(): ReactElement {
       />
       {view === 'memories' && <MemoryPanel />}
       {view === 'reminders' && <ReminderPanel />}
+      {view === 'settings' && <SettingsPanel />}
       {view === 'chat' && (
         <ChatWindow
           key={selectedId ?? 'none'}

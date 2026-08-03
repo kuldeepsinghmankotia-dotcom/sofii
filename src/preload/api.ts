@@ -75,4 +75,6 @@ export interface SofiiElectronAPI {
   cancelReminder: (reminderId: string) => Promise<{ ok: true }>
   deleteReminder: (reminderId: string) => Promise<{ ok: true }>
   onReminderFired: (callback: (reminder: Reminder) => void) => () => void
+  hasApiKey: () => Promise<boolean>
+  setApiKey: (key: string) => Promise<{ ok: true }>
 }

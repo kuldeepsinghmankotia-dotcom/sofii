@@ -47,7 +47,11 @@ const api: SofiiElectronAPI = {
     const listener = (_: Electron.IpcRendererEvent, data: Reminder): void => callback(data)
     ipcRenderer.on('reminder:fired', listener)
     return () => ipcRenderer.removeListener('reminder:fired', listener)
-  }
+  },
+
+  hasApiKey: () => ipcRenderer.invoke('settings:has-api-key'),
+
+  setApiKey: (key) => ipcRenderer.invoke('settings:set-api-key', key)
 }
 
 contextBridge.exposeInMainWorld('electron', api)

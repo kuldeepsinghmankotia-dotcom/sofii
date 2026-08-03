@@ -51,3 +51,10 @@ export function getGroqClient(): OpenAI {
   }
   return client
 }
+
+// Called after the user saves a new API key via Settings, so the next
+// getGroqClient() call rebuilds with it instead of keeping a stale client
+// constructed with a missing/old key.
+export function resetGroqClient(): void {
+  client = undefined
+}

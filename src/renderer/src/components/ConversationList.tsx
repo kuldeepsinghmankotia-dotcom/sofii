@@ -1,7 +1,7 @@
 import { useState, type ReactElement } from 'react'
 import type { ConversationSummary } from '../../../preload/api'
 
-export type View = 'chat' | 'memories' | 'reminders'
+export type View = 'chat' | 'memories' | 'reminders' | 'settings'
 
 type Props = {
   conversations: ConversationSummary[]
@@ -114,6 +114,22 @@ export default function ConversationList({
             }}
           >
             ⏰ Reminders
+          </button>
+
+          <button
+            onClick={() => onSetView(view === 'settings' ? 'chat' : 'settings')}
+            title="Settings"
+            style={{
+              background: view === 'settings' ? '#1f2937' : 'transparent',
+              color: 'white',
+              border: '1px solid #374151',
+              borderRadius: 10,
+              padding: '10px 10px',
+              cursor: 'pointer',
+              fontSize: 13
+            }}
+          >
+            ⚙️
           </button>
         </div>
       </div>

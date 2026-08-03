@@ -6,10 +6,12 @@ import icon from '../../resources/icon.png?asset'
 import { loadEnv } from './lib/env'
 import log from './lib/logger'
 import { initDb } from './services/db'
+import { applyStoredApiKey } from './services/settings'
 import { registerChatIpc } from './ipc/chat'
 import { registerVoiceIpc } from './ipc/voice'
 import { registerMemoryIpc } from './ipc/memory'
 import { registerReminderIpc } from './ipc/reminders'
+import { registerSettingsIpc } from './ipc/settings'
 
 loadEnv()
 
@@ -43,11 +45,13 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  applyStoredApiKey()
   initDb(join(app.getPath('userData'), 'sofii.db'))
   registerChatIpc()
   registerVoiceIpc()
   registerMemoryIpc()
   registerReminderIpc()
+  registerSettingsIpc()
   log.info('Sofii ready, database initialized at', join(app.getPath('userData'), 'sofii.db'))
 
   // This is a single-user local desktop app (not an arbitrary website), so
