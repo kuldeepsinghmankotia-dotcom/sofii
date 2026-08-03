@@ -97,6 +97,135 @@ Config/build wiring: `electron.vite.config.ts` defines the three build targets (
 
 **Packaging**: `npm run build:mac` produces a real, launchable `.app` (plus `.dmg`/`.zip`) in `dist/mac-arm64/` (gitignored — regenerate, don't commit). `notarize: false` and no Apple Developer identity means the app is unsigned — macOS Gatekeeper will warn on first launch (right-click → Open works around it); this is expected for a personal/unsigned build, not a bug. `npmRebuild: false` in `electron-builder.yml` means it does **not** re-rebuild native modules (`better-sqlite3`) for packaging — relies on the ABI already matching from `postinstall`'s `electron-builder install-app-deps` after `npm install`, which it does in practice (verified: the packaged app's SQLite operations work). The DMG-building step (`hdiutil`/Python `dmgbuild`) can intermittently fail in constrained/sandboxed environments even when the underlying `.app` bundle builds fine — check `dist/mac-arm64/*.app` directly if the `.dmg` step errors out. First real packaged-build test surfaced a genuine bug: the packaged app has no `.env` (see Environment section) and originally had no way to configure `GROQ_API_KEY` at all — that's what motivated the Settings view.
 
+## Architecture Diagrams
+
+These render natively on GitHub. Complements the prose above — same architecture, visual form.
+
+### System overview
+
+The renderer never talks to Groq, SQLite, or the filesystem directly — everything crosses `contextBridge` as a narrow typed API, then flows through the thin `ipc/` layer into `services/`.
+
+```mermaid
+flowchart TB
+  subgraph REND["RENDERER PROCESS"]
+    APP["App.tsx"]
+    CW["ChatWindow"]
+    MP["MemoryPanel"]
+    RP["ReminderPanel"]
+    SP["SettingsPanel"]
+    APP --> CW
+    APP --> MP
+    APP --> RP
+    APP --> SP
+  end
+
+  subgraph PRE["PRELOAD — contextBridge"]
+    BR["window.electron<br/>typed API surface"]
+  end
+
+  subgraph MAIN["MAIN PROCESS"]
+    IPCL["ipc/*.ts<br/>thin handlers"]
+    SVC["services/*.ts<br/>business logic"]
+    IPCL --> SVC
+  end
+
+  DB[("SQLite<br/>sofii.db")]
+  GROQ{{"Groq API"}}
+  METEO{{"Open-Meteo API"}}
+  OSN["OS Notifications"]
+
+  CW --> BR
+  MP --> BR
+  RP --> BR
+  SP --> BR
+  BR --> IPCL
+  SVC --> DB
+  SVC --> GROQ
+  SVC --> METEO
+  SVC --> OSN
+```
+
+### Chat & tool-calling flow
+
+Memory recall is a silent keyword lookup; tool-calling is capped at exactly one round — the follow-up call has no tools available, so the model can't chain further actions.
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant R as ChatWindow
+  participant C as chat.ts
+  participant D as SQLite
+  participant G as Groq API
+  participant T as Tool Executor
+
+  U->>R: type message, press Send
+  R->>C: chat send-message
+  C->>D: insert user message
+  C->>D: rank memories by keyword overlap
+  C->>G: stream completion, tools enabled
+  G-->>C: content deltas, maybe tool calls
+  C-->>R: stream chunk events
+  alt tool call returned
+    C->>T: execute tool
+    T->>D: create reminder or memory
+    T-->>C: result text
+    C->>G: follow-up completion, tools disabled
+    G-->>C: final content deltas
+    C-->>R: stream chunk events, continued
+  end
+  C->>D: insert assistant message
+  opt first exchange in conversation
+    C->>G: generate short title
+    C->>D: rename conversation
+  end
+  C-->>R: stream done event
+```
+
+### Reminder lifecycle
+
+On every launch, `initScheduler()` checks every pending reminder: anything already overdue fires immediately instead of being silently dropped; everything else gets a fresh `setTimeout` for its remaining delay.
+
+```mermaid
+flowchart TD
+  A["User creates a reminder<br/>via UI or chat tool call"] --> B[("SQLite<br/>status = pending")]
+  B --> C{"Is the app<br/>running right now"}
+  C -->|yes| D["scheduler.ts<br/>schedules a setTimeout"]
+  C -->|no, closed| E["Next launch:<br/>initScheduler checks all pending"]
+  E --> F{"Was the scheduled<br/>time already passed"}
+  F -->|yes, missed| G["Fire immediately"]
+  F -->|no| D
+  D --> H["Timer fires at<br/>the scheduled time"]
+  H --> G
+  G --> I["reminderFiring.ts<br/>shows an OS Notification"]
+  I --> J[("SQLite<br/>status = fired")]
+  I --> K["Broadcasts reminder-fired<br/>to every open window"]
+```
+
+### Main-process layering
+
+`index.ts` only owns app lifecycle, `ipc/` is a thin translation layer, and all real logic lives in `services/` — deliberately kept free of Electron imports (one narrow exception for reminder notifications) so it can be unit tested without spinning up the app.
+
+```mermaid
+flowchart TB
+  A["main/index.ts<br/>app + BrowserWindow lifecycle only"] --> B["main/ipc/*.ts<br/>translates IPC calls to service calls"]
+  B --> C["main/services/*.ts<br/>business logic, unit tested"]
+  C --> D[("better-sqlite3")]
+  C --> E{{"Groq / Open-Meteo"}}
+  C --> F["Notification, BrowserWindow"]
+```
+
+### Stack & cost
+
+| Capability              | Technology                             | Cost                   |
+| ----------------------- | -------------------------------------- | ---------------------- |
+| Chat completions        | Groq — `openai/gpt-oss-120b`           | $0 · free tier         |
+| Voice transcription     | Groq — `whisper-large-v3-turbo`        | $0 · free tier         |
+| Text-to-speech          | Web Speech Synthesis API               | $0 · built in, offline |
+| Memory storage & recall | better-sqlite3 + keyword ranking       | $0 · local             |
+| Reminders & scheduling  | `setTimeout` + Electron `Notification` | $0 · local             |
+| Weather tool            | Open-Meteo geocoding + forecast        | $0 · no API key        |
+| Packaging               | electron-builder                       | $0 · unsigned build    |
+
 ## Environment
 
 Requires a `GROQ_API_KEY`. Two sources, in priority order:
